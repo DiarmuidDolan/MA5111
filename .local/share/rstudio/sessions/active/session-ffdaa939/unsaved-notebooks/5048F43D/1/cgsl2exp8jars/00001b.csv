@@ -1,0 +1,4 @@
+"0",""
+"0","txi <- tximport(file, type = ""kallisto"", tx2gene = tx2gene)"
+"2","Error in file.exists(files) : invalid 'file' argument
+"

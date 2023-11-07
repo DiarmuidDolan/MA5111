@@ -1,0 +1,8 @@
+"0",""
+"0","filtered_genes <- upregulated_genes[upregulated_genes$log2FoldChange > 1 & upregulated_genes$pvalue <= 0.05,]"
+"0",""
+"0","filtered_genes <- filtered_genes[order(-filtered_genes$log2FoldChange),]"
+"0",""
+"0","top_genes <- head(filtered_genes, n = 10)"
+"0",""
+"0","print(top_genes)"

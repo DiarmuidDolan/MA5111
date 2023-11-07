@@ -1,0 +1,4 @@
+"0","dds <- DESeqDataSetFromTximport(txi, colData = samples, design = ~ Condition)"
+"2","Warning: some variables in design formula are characters, converting to factors"
+"2","using counts and average transcript lengths from tximport
+"

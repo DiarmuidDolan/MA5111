@@ -1,0 +1,512 @@
+library(tximport)
+library(rhdf5)
+library(gplots)
+library(org.Hs.eg.db)
+library(DESeq2)
+library(DT)
+library(apeglm)
+library(RColorBrewer)
+library(IHW)
+library(PCAtools)
+library(pheatmap)
+library(clusterProfiler)
+library(EnhancedVolcano)
+library(ComplexHeatmap)
+library(circlize)
+library(fgsea)
+library(tidyverse)
+library(ggpubr)
+library(dplyr)
+library(biomaRt)
+library(tximport)
+library(rhdf5)
+library(gplots)
+library(org.Hs.eg.db)
+library(DESeq2)
+library(DT)
+library(apeglm)
+library(RColorBrewer)
+library(IHW)
+library(PCAtools)
+library(pheatmap)
+library(clusterProfiler)
+library(EnhancedVolcano)
+library(ComplexHeatmap)
+library(circlize)
+library(fgsea)
+library(tidyverse)
+library(ggpubr)
+quant_dir <- "/home/data"
+list.files(quant_dir)
+samples <- data.frame(
+Sample = c("sample_1", "sample_2", "sample_3", "tumour_4", "tumour_5", "tumour_6"),
+Condition = c("control", "control", "control", "tumour", "tumour", "tumour")
+)
+print(samples)
+factor_cols <- sapply(samples, is.factor)
+factor_cols
+files <- c(
+"/home/data/control_1/abundance.tsv",
+"/home/data/control_2/abundance.tsv",
+"/home/data/control_3/abundance.tsv",
+"/home/data/tumour_1/abundance.tsv",
+"/home/data/tumour_2/abundance.tsv",
+"/home/data/tumour_3/abundance.tsv"
+)
+mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl")
+tx2gene <- getBM(attributes = c("ensembl_transcript_id_version", "hgnc_symbol"), mart = mart, useCache = FALSE)
+head(tx2gene)
+txi <- tximport(files, type = "kallisto", tx2gene = tx2gene)
+head(txi$abundance)
+dds <- DESeqDataSetFromTximport(txi, colData = samples, design = ~ Condition)
+dds$Condition <- relevel(dds$Condition, ref = "control")
+dds <- DESeq(dds)
+result_names <- resultsNames(dds)
+result_names
+counts <- counts(dds, normalized= TRUE)
+counts
+log2_counts <- assay(normTransform(dds))
+rld_counts <- assay(rlog(dds))
+library(vsn)
+library(hexbin)
+log2_plt <- meanSdPlot(log2_counts, ranks=FALSE, plot=FALSE)
+log2_plt$gg + ggtitle("Log2 + PC Transformation") + xlim(0,20)
+rld_plt <- meanSdPlot(rld_counts, ranks=FALSE, plot=FALSE)
+rld_plt$gg + ggtitle("Rlog Transformation") + xlim(0,20)
+sampleDists <- dist(t(rld_counts))
+sampleDists
+sampleDists <- dist(t(rld_counts))
+sampleDistMatrix <- as.matrix(sampleDists)
+ann <- data.frame(Sample = samples$Sample, Condition = samples$Condition)
+col <- c("blue", "forestgreen")
+names(col) <- c("control", "tumour")
+ann_col <- list(Condition = col)
+ann_col
+rownames(ann) <- rownames(sampleDistMatrix)
+pheatmap(mat=sampleDistMatrix,
+clustering_distance_rows=sampleDists,
+clustering_distance_cols=sampleDists,
+annotation_col = ann,
+annotation_colors = ann_col,
+col=hcl.colors(100,"GnBu",rev=T))
+p <- pca(rld_counts, metadata = samples)
+biplot(p,
+colby = 'Condition',
+colkey = c('control'='blue', 'tumour'='forestgreen'),
+hline = 0,
+vline = 0,
+legendPosition = 'right',
+legendLabSize = 12,
+legendIconSize = 8.0,
+title = 'PCA bi-plot',
+subtitle = 'PC1 versus PC2')
+tumour_v_ctrl <- results(dds, filterFun=ihw, alpha=0.05, contrast=c("Condition", "tumour", "control"))
+res1 <- lfcShrink(dds=dds, res=tumour_v_ctrl, coef=2, type="apeglm")
+summary(res1)
+res1
+get_upregulated <- function(df){
+key <- intersect(rownames(df)[which(df$log2FoldChange >= 1)], rownames(df)[which(df$pvalue <= 0.05)])
+results <- as.data.frame((df)[which(rownames(df) %in% key),])
+return(results)
+}
+get_downregulated <- function(df){
+key <- intersect(rownames(df)[which(df$log2FoldChange <= -1)], rownames(df)[which(df$pvalue <= 0.05)])
+results <- as.data.frame((df)[which(rownames(df) %in% key),])
+return(results)
+}
+upregulated_genes <- get_upregulated(res1)
+downregulated_genes <- get_downregulated(res1)
+upregulated_annotated <- getBM(attributes = c("ensembl_gene_id", "external_gene_name"),
+filters = "ensembl_gene_id",
+values = rownames(upregulated_genes),
+mart = mart)
+downregulated_annotated <- getBM(attributes = c("ensembl_gene_id", "external_gene_name"),
+filters = "ensembl_gene_id",
+values = rownames(downregulated_genes),
+mart = mart)
+print(upregulated_genes)
+print(downregulated_genes)
+summary(upregulated_genes)
+summary(downregulated_genes)
+filtered_genes <- upregulated_genes[upregulated_genes$log2FoldChange > 1 & upregulated_genes$pvalue <= 0.05,]
+filtered_genes <- filtered_genes[order(-filtered_genes$log2FoldChange),]
+top_genes <- head(filtered_genes, n = 10)
+print(top_genes)
+volcano_plot_combined <- function(up_df, down_df, threshold = 0.05, log2FC = 1) {
+up <- up_df[up_df$log2FoldChange > log2FC & up_df$pvalue < threshold, ]
+down <- down_df[down_df$log2FoldChange < -log2FC & down_df$pvalue < threshold, ]
+plot(c(up_df$log2FoldChange, down_df$log2FoldChange),
+c(-log10(up_df$pvalue), -log10(down_df$pvalue)),
+col="grey", xlab="log2 Fold Change", ylab="-log10 p-value", main="Volcano Plot")
+points(up$log2FoldChange, -log10(up$pvalue), col="red", pch=16)
+points(down$log2FoldChange, -log10(down$pvalue), col="blue", pch=16)
+legend("topright", legend=c("Upregulated", "Downregulated"),
+col=c("red", "blue"), pch=16)
+}
+volcano_plot_combined(upregulated_genes, downregulated_genes)
+library(pheatmap)
+pheatmap(as.matrix(upregulated_genes[c("baseMean", "log2FoldChange", "pvalue", "padj")]), main="Upregulated Genes")
+pheatmap(as.matrix(downregulated_genes[c("baseMean", "log2FoldChange", "pvalue", "padj")]), main="Downregulated Genes")
+res1 <- na.omit(res1)
+min_width <- min(res1$log2FoldChange)
+max_width <- max(res1$log2FoldChange)
+max_height <- -log10(min(res1[res1$pvalue>0, 5]))
+up <- subset(res1, res1$log2FoldChange > 1 & res1$pvalue <= 0.05)
+up <- up[order(-up$log2FoldChange),]
+up_list <- head(rownames(up), n=10L)
+down <- subset(res1, res1$log2FoldChange < -1 & res1$pvalue <= 0.05)
+down <- down[order(down$log2FoldChange),]
+down_list <- head(rownames(down), n=10L)
+plot_top_20 <- c(up_list, down_list)
+EnhancedVolcano(res1,
+lab=rownames(res1),
+x="log2FoldChange",
+y="pvalue",
+selectLab=plot_top_20,
+drawConnectors=TRUE,
+legendPosition = "none",
+FCcutoff=1.0,
+pCutoff=0.05,
+title="Volcano Plot",
+subtitle="Tumour vs. Control",
+caption = paste0('Total Genes = ', nrow(res1)),
+xlim=c(min_width, max_width),
+ylim=c(0, max_height))
+res1 <- na.omit(tumour_v_ctrl)
+min_width <- min(res1$log2FoldChange)
+max_width <- max(res1$log2FoldChange)
+max_height <- -log10(min(res1[res1$pvalue>0, 5]))
+up <- subset(res1, res1$log2FoldChange > 1 & res1$pvalue <= 0.05)
+up <- up[order(-up$log2FoldChange),]
+up_list <- head(rownames(up), n=10L)
+down <- subset(res1, res1$log2FoldChange < -1 & res1$pvalue <= 0.05)
+down <- down[order(down$log2FoldChange),]
+down_list <- head(rownames(down), n=10L)
+plot_top_20 <- c(up_list, down_list)
+EnhancedVolcano(res1,
+lab=rownames(res1),
+x="log2FoldChange",
+y="pvalue",
+selectLab=plot_top_20,
+drawConnectors=TRUE,
+FCcutoff=1.0,
+pCutoff=0.05,
+title="Volcano Plot",
+subtitle="Tumour vs. Control",
+legendLabSize=8,
+caption = paste0('Total Genes = ', nrow(res1)))
+res1 <- na.omit(res1)
+res <- as.data.frame(res1)
+res$hgnc_symbol <- rownames(res)
+fgsea_rank <- res %>%
+dplyr::select(hgnc_symbol, log2FoldChange) %>%
+na.omit() %>%
+distinct() %>%
+group_by(hgnc_symbol) %>%
+summarize(stat=mean(log2FoldChange))
+fgsea_rank
+rank <- deframe(fgsea_rank)
+head(rank, 20)
+pathway <- gmtPathways("/home/rstudio/c6.all.v2023.2.Hs.symbols.gmt")
+head(pathway, 1)
+fgsea <- fgsea(pathways=pathway, stats=rank, nperm=1000)
+fgseaResTidy <- fgsea %>%
+as_tibble() %>%
+arrange(desc(NES))
+fgseaResTidy %>%
+dplyr::select(-leadingEdge, -ES, -nMoreExtreme) %>%
+arrange(padj) %>%
+DT::datatable()
+filtered_pathway1 <- subset(fgsea, NES > 1.2)
+filtered_pathway1
+filtered_pathway2 <- subset(fgsea, NES < -1.3)
+filtered_pathway2
+filt_down <- as.vector(filtered_pathway1$pathway)
+for (i in filt_down){
+plt <- plotEnrichment(pathway = pathway[[i]],
+gseaParam = 1, ticksSize = 0.5, stats= rank) +
+labs(title=i) + theme(plot.title = element_text(hjust = 0.5, face="bold"))
+print(plt)
+}
+library(dplyr)
+library(biomaRt)
+library(tximport)
+library(rhdf5)
+library(gplots)
+library(org.Hs.eg.db)
+library(DESeq2)
+library(DT)
+library(apeglm)
+library(RColorBrewer)
+library(IHW)
+library(PCAtools)
+library(pheatmap)
+library(clusterProfiler)
+library(EnhancedVolcano)
+library(ComplexHeatmap)
+library(circlize)
+library(fgsea)
+library(tidyverse)
+library(ggpubr)
+library(dplyr)
+library(biomaRt)
+library(tximport)
+library(rhdf5)
+library(gplots)
+library(org.Hs.eg.db)
+library(DESeq2)
+library(DT)
+library(apeglm)
+library(RColorBrewer)
+library(IHW)
+library(PCAtools)
+library(pheatmap)
+library(clusterProfiler)
+library(EnhancedVolcano)
+library(ComplexHeatmap)
+library(circlize)
+library(fgsea)
+library(tidyverse)
+library(ggpubr)
+quant_dir <- "/home/data"
+list.files(quant_dir)
+samples <- data.frame(
+Sample = c("sample_1", "sample_2", "sample_3", "tumour_4", "tumour_5", "tumour_6"),
+Condition = c("control", "control", "control", "tumour", "tumour", "tumour")
+)
+print(samples)
+factor_cols <- sapply(samples, is.factor)
+factor_cols
+files <- c(
+"/home/data/control_1/abundance.tsv",
+"/home/data/control_2/abundance.tsv",
+"/home/data/control_3/abundance.tsv",
+"/home/data/tumour_1/abundance.tsv",
+"/home/data/tumour_2/abundance.tsv",
+"/home/data/tumour_3/abundance.tsv"
+)
+mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl")
+tx2gene <- getBM(attributes = c("ensembl_transcript_id_version", "hgnc_symbol"), mart = mart, useCache = FALSE)
+head(tx2gene)
+txi <- tximport(files, type = "kallisto", tx2gene = tx2gene)
+head(txi$abundance)
+dds <- DESeqDataSetFromTximport(txi, colData = samples, design = ~ Condition)
+dds$Condition <- relevel(dds$Condition, ref = "control")
+dds <- DESeq(dds)
+result_names <- resultsNames(dds)
+result_names
+counts <- counts(dds, normalized= TRUE)
+counts
+log2_counts <- assay(normTransform(dds))
+rld_counts <- assay(rlog(dds))
+library(vsn)
+library(hexbin)
+log2_plt <- meanSdPlot(log2_counts, ranks=FALSE, plot=FALSE)
+log2_plt$gg + ggtitle("Log2 + PC Transformation") + xlim(0,20)
+rld_plt <- meanSdPlot(rld_counts, ranks=FALSE, plot=FALSE)
+rld_plt$gg + ggtitle("Rlog Transformation") + xlim(0,20)
+sampleDists <- dist(t(rld_counts))
+sampleDists
+sampleDists <- dist(t(rld_counts))
+sampleDistMatrix <- as.matrix(sampleDists)
+ann <- data.frame(Sample = samples$Sample, Condition = samples$Condition)
+col <- c("blue", "forestgreen")
+names(col) <- c("control", "tumour")
+ann_col <- list(Condition = col)
+ann_col
+rownames(ann) <- rownames(sampleDistMatrix)
+pheatmap(mat=sampleDistMatrix,
+clustering_distance_rows=sampleDists,
+clustering_distance_cols=sampleDists,
+annotation_col = ann,
+annotation_colors = ann_col,
+col=hcl.colors(100,"GnBu",rev=T))
+p <- pca(rld_counts, metadata = samples)
+biplot(p,
+colby = 'Condition',
+colkey = c('control'='blue', 'tumour'='forestgreen'),
+hline = 0,
+vline = 0,
+legendPosition = 'right',
+legendLabSize = 12,
+legendIconSize = 8.0,
+title = 'PCA bi-plot',
+subtitle = 'PC1 versus PC2')
+tumour_v_ctrl <- results(dds, filterFun=ihw, alpha=0.05, contrast=c("Condition", "tumour", "control"))
+res1 <- lfcShrink(dds=dds, res=tumour_v_ctrl, coef=2, type="apeglm")
+summary(res1)
+res1
+get_upregulated <- function(df){
+key <- intersect(rownames(df)[which(df$log2FoldChange >= 1)], rownames(df)[which(df$pvalue <= 0.05)])
+results <- as.data.frame((df)[which(rownames(df) %in% key),])
+return(results)
+}
+get_downregulated <- function(df){
+key <- intersect(rownames(df)[which(df$log2FoldChange <= -1)], rownames(df)[which(df$pvalue <= 0.05)])
+results <- as.data.frame((df)[which(rownames(df) %in% key),])
+return(results)
+}
+upregulated_genes <- get_upregulated(res1)
+downregulated_genes <- get_downregulated(res1)
+upregulated_annotated <- getBM(attributes = c("ensembl_gene_id", "external_gene_name"),
+filters = "ensembl_gene_id",
+values = rownames(upregulated_genes),
+mart = mart)
+downregulated_annotated <- getBM(attributes = c("ensembl_gene_id", "external_gene_name"),
+filters = "ensembl_gene_id",
+values = rownames(downregulated_genes),
+mart = mart)
+print(upregulated_genes)
+print(downregulated_genes)
+summary(upregulated_genes)
+summary(downregulated_genes)
+filtered_genes <- upregulated_genes[upregulated_genes$log2FoldChange > 1 & upregulated_genes$pvalue <= 0.05,]
+filtered_genes <- filtered_genes[order(-filtered_genes$log2FoldChange),]
+top_genes <- head(filtered_genes, n = 10)
+print(top_genes)
+volcano_plot_combined <- function(up_df, down_df, threshold = 0.05, log2FC = 1) {
+up <- up_df[up_df$log2FoldChange > log2FC & up_df$pvalue < threshold, ]
+down <- down_df[down_df$log2FoldChange < -log2FC & down_df$pvalue < threshold, ]
+plot(c(up_df$log2FoldChange, down_df$log2FoldChange),
+c(-log10(up_df$pvalue), -log10(down_df$pvalue)),
+col="grey", xlab="log2 Fold Change", ylab="-log10 p-value", main="Volcano Plot")
+points(up$log2FoldChange, -log10(up$pvalue), col="red", pch=16)
+points(down$log2FoldChange, -log10(down$pvalue), col="blue", pch=16)
+legend("topright", legend=c("Upregulated", "Downregulated"),
+col=c("red", "blue"), pch=16)
+}
+volcano_plot_combined(upregulated_genes, downregulated_genes)
+library(pheatmap)
+pheatmap(as.matrix(upregulated_genes[c("baseMean", "log2FoldChange", "pvalue", "padj")]), main="Upregulated Genes")
+pheatmap(as.matrix(downregulated_genes[c("baseMean", "log2FoldChange", "pvalue", "padj")]), main="Downregulated Genes")
+res1 <- na.omit(res1)
+min_width <- min(res1$log2FoldChange)
+max_width <- max(res1$log2FoldChange)
+max_height <- -log10(min(res1[res1$pvalue>0, 5]))
+up <- subset(res1, res1$log2FoldChange > 1 & res1$pvalue <= 0.05)
+up <- up[order(-up$log2FoldChange),]
+up_list <- head(rownames(up), n=10L)
+down <- subset(res1, res1$log2FoldChange < -1 & res1$pvalue <= 0.05)
+down <- down[order(down$log2FoldChange),]
+down_list <- head(rownames(down), n=10L)
+plot_top_20 <- c(up_list, down_list)
+EnhancedVolcano(res1,
+lab=rownames(res1),
+x="log2FoldChange",
+y="pvalue",
+selectLab=plot_top_20,
+drawConnectors=TRUE,
+legendPosition = "none",
+FCcutoff=1.0,
+pCutoff=0.05,
+title="Volcano Plot",
+subtitle="Tumour vs. Control",
+caption = paste0('Total Genes = ', nrow(res1)),
+xlim=c(min_width, max_width),
+ylim=c(0, max_height))
+res1 <- na.omit(tumour_v_ctrl)
+min_width <- min(res1$log2FoldChange)
+max_width <- max(res1$log2FoldChange)
+max_height <- -log10(min(res1[res1$pvalue>0, 5]))
+up <- subset(res1, res1$log2FoldChange > 1 & res1$pvalue <= 0.05)
+up <- up[order(-up$log2FoldChange),]
+up_list <- head(rownames(up), n=10L)
+down <- subset(res1, res1$log2FoldChange < -1 & res1$pvalue <= 0.05)
+down <- down[order(down$log2FoldChange),]
+down_list <- head(rownames(down), n=10L)
+plot_top_20 <- c(up_list, down_list)
+EnhancedVolcano(res1,
+lab=rownames(res1),
+x="log2FoldChange",
+y="pvalue",
+selectLab=plot_top_20,
+drawConnectors=TRUE,
+FCcutoff=1.0,
+pCutoff=0.05,
+title="Volcano Plot",
+subtitle="Tumour vs. Control",
+legendLabSize=8,
+caption = paste0('Total Genes = ', nrow(res1)))
+res1 <- na.omit(res1)
+res <- as.data.frame(res1)
+res$hgnc_symbol <- rownames(res)
+fgsea_rank <- res %>%
+dplyr::select(hgnc_symbol, log2FoldChange) %>%
+na.omit() %>%
+distinct() %>%
+group_by(hgnc_symbol) %>%
+summarize(stat=mean(log2FoldChange))
+fgsea_rank
+rank <- deframe(fgsea_rank)
+head(rank, 20)
+pathway <- gmtPathways("/home/rstudio/c6.all.v2023.2.Hs.symbols.gmt")
+head(pathway, 1)
+fgsea <- fgsea(pathways=pathway, stats=rank, nperm=1000)
+fgseaResTidy <- fgsea %>%
+as_tibble() %>%
+arrange(desc(NES))
+fgseaResTidy %>%
+dplyr::select(-leadingEdge, -ES, -nMoreExtreme) %>%
+arrange(padj) %>%
+DT::datatable()
+filtered_pathway1 <- subset(fgsea, NES > 1.2)
+filtered_pathway1
+filtered_pathway2 <- subset(fgsea, NES < -1.3)
+filtered_pathway2
+filt_down <- as.vector(filtered_pathway1$pathway)
+for (i in filt_down){
+plt <- plotEnrichment(pathway = pathway[[i]],
+gseaParam = 1, ticksSize = 0.5, stats= rank) +
+labs(title=i) + theme(plot.title = element_text(hjust = 0.5, face="bold"))
+print(plt)
+}
+log2_counts <- assay(normTransform(dds))
+rld_counts <- assay(rlog(dds))
+library(vsn)
+library(hexbin)
+log2_plt <- meanSdPlot(log2_counts, ranks=FALSE, plot=FALSE)
+log2_plt$gg + ggtitle("Log2 + PC Transformation") + xlim(0,20)
+rld_plt <- meanSdPlot(rld_counts, ranks=FALSE, plot=FALSE)
+rld_plt$gg + ggtitle("Rlog Transformation") + xlim(0,20)
+rownames(ann) <- rownames(sampleDistMatrix)
+pheatmap(mat=sampleDistMatrix,
+clustering_distance_rows=sampleDists,
+clustering_distance_cols=sampleDists,
+annotation_col = ann,
+annotation_colors = ann_col,
+col=hcl.colors(100,"GnBu",rev=T))
+tumour_v_ctrl <- results(dds, filterFun=ihw, alpha=0.05, contrast=c("Condition", "tumour", "control"))
+res1 <- lfcShrink(dds=dds, res=tumour_v_ctrl, coef=2, type="apeglm")
+summary(res1)
+res1
+volcano_plot_combined <- function(up_df, down_df, threshold = 0.05, log2FC = 1) {
+up <- up_df[up_df$log2FoldChange > log2FC & up_df$pvalue < threshold, ]
+down <- down_df[down_df$log2FoldChange < -log2FC & down_df$pvalue < threshold, ]
+plot(c(up_df$log2FoldChange, down_df$log2FoldChange),
+c(-log10(up_df$pvalue), -log10(down_df$pvalue)),
+col="grey", xlab="log2 Fold Change", ylab="-log10 p-value", main="Volcano Plot")
+points(up$log2FoldChange, -log10(up$pvalue), col="red", pch=16)
+points(down$log2FoldChange, -log10(down$pvalue), col="blue", pch=16)
+legend("topright", legend=c("Upregulated", "Downregulated"),
+col=c("red", "blue"), pch=16)
+}
+volcano_plot_combined(upregulated_genes, downregulated_genes)
+library(pheatmap)
+pheatmap(as.matrix(upregulated_genes[c("baseMean", "log2FoldChange", "pvalue", "padj")]), main="Upregulated Genes")
+pheatmap(as.matrix(downregulated_genes[c("baseMean", "log2FoldChange", "pvalue", "padj")]), main="Downregulated Genes")
+upregulated_genes <- get_upregulated(res1)
+downregulated_genes <- get_downregulated(res1)
+upregulated_annotated <- getBM(attributes = c("ensembl_gene_id", "external_gene_name"),
+filters = "ensembl_gene_id",
+values = rownames(upregulated_genes),
+mart = mart)
+downregulated_annotated <- getBM(attributes = c("ensembl_gene_id", "external_gene_name"),
+filters = "ensembl_gene_id",
+values = rownames(downregulated_genes),
+mart = mart)
+print(upregulated_genes)
+print(downregulated_genes)
+filtered_genes <- upregulated_genes[upregulated_genes$log2FoldChange > 1 & upregulated_genes$pvalue <= 0.05,]
+filtered_genes <- filtered_genes[order(-filtered_genes$log2FoldChange),]
+top_genes <- head(filtered_genes, n = 10)
+print(top_genes)

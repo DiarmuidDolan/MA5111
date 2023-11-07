@@ -1,0 +1,6 @@
+"0","samples <- data.frame("
+"0","  Sample = c(""sample_1"", ""sample_2"", ""sample_3"", ""tumour_4"", ""tumour_5"", ""tumour_6""),"
+"0","  Condition = c(""control"", ""control"", ""control"", ""tumour"", ""tumour"", ""tumour"")"
+"0",")"
+"0",""
+"0","print(samples)"

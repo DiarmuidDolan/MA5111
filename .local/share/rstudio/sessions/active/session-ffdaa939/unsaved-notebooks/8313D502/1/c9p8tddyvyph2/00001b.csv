@@ -1,0 +1,8 @@
+"0","rownames(ann) <- rownames(sampleDistMatrix)"
+"0",""
+"0","pheatmap(mat=sampleDistMatrix,"
+"0","         clustering_distance_rows=sampleDists,"
+"0","         clustering_distance_cols=sampleDists,"
+"0","         annotation_col = ann,"
+"0","         annotation_colors = ann_col,"
+"0","         col=hcl.colors(100,""GnBu"",rev=T))"

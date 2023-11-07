@@ -1,0 +1,2 @@
+"0","pheatmap(as.matrix(downregulated_genes[c(""baseMean"", ""log2FoldChange"", ""pvalue"", ""padj"")]), main=""Downregulated Genes"")"
+"0",""

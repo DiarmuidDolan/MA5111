@@ -1,0 +1,24 @@
+"0","dds$Condition <- relevel(dds$Condition, ref = ""control"")"
+"0",""
+"0","dds <- DESeq(dds)"
+"2","estimating size factors
+"
+"2","using 'avgTxLength' from assays(dds), correcting for library size
+"
+"2","estimating dispersions
+"
+"2","gene-wise dispersion estimates
+"
+"2","mean-dispersion relationship
+"
+"2","final dispersion estimates
+"
+"2","fitting model and testing
+"
+"0","result_names <- resultsNames(dds)"
+"0","result_names"
+"1","[1]"
+"1"," ""Intercept""                  "
+"1"," ""Condition_tumour_vs_control"""
+"1","
+"

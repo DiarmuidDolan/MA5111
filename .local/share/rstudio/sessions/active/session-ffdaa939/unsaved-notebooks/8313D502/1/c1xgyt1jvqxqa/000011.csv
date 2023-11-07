@@ -1,0 +1,8 @@
+"0","files <- c("
+"0","  ""/home/data/control_1/abundance.tsv"","
+"0","  ""/home/data/control_2/abundance.tsv"","
+"0","  ""/home/data/control_3/abundance.tsv"","
+"0","  ""/home/data/tumour_1/abundance.tsv"","
+"0","  ""/home/data/tumour_2/abundance.tsv"","
+"0","  ""/home/data/tumour_3/abundance.tsv"""
+"0",")"

@@ -1,0 +1,3 @@
+"0","upregulated_genes <- get_upregulated(res1)"
+"0","downregulated_genes <- get_downregulated(res1)"
+"0",""

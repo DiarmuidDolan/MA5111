@@ -1,0 +1,2 @@
+"0","samples <- read.csv(""/home/data/samples.csv"", header = TRUE, row.names = ""sample"")"
+"0","samples"

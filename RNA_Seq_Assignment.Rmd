@@ -1,0 +1,707 @@
+
+title: "RNA Seq Assignment"
+name: Diarmuid Dolan
+date: "2023-10-27"
+output:
+  html_document: default
+  pdf_document: default
+  word_document: default
+student number: 21314283
+github: https://github.com/DiarmuidDolan
+
+```{r}
+library(dplyr)
+library(biomaRt)
+library(tximport)
+library(rhdf5)
+library(gplots)
+library(org.Hs.eg.db)
+library(DESeq2)
+library(DT)
+library(apeglm)
+library(RColorBrewer)
+library(IHW)
+library(PCAtools)
+library(pheatmap)
+library(clusterProfiler)
+library(EnhancedVolcano)
+library(ComplexHeatmap)
+library(circlize)
+library(fgsea)
+library(tidyverse)
+library(ggpubr)
+```
+
+# Introduction
+
+This R Markdown File runs through an RNA-Seq differential expression analysis using DESeq2. Quality control plots, differential expression results, plots and pathway analysis are all displayed within the document.
+
+```{r}
+quant_dir <- "/home/data"
+list.files(quant_dir)
+```
+
+## Reading Input Data
+
+### Metadata
+
+```{r}
+samples <- data.frame(
+  Sample = c("sample_1", "sample_2", "sample_3", "tumour_4", "tumour_5", "tumour_6"),
+  Condition = c("control", "control", "control", "tumour", "tumour", "tumour")
+)
+
+print(samples)
+
+```
+
+### Checking Numerics to convert to Factors
+
+```{r}
+factor_cols <- sapply(samples, is.factor)
+
+factor_cols
+
+```
+
+### Stage Kallisto Files
+
+```{r}
+files <- c(
+  "/home/data/control_1/abundance.tsv",
+  "/home/data/control_2/abundance.tsv",
+  "/home/data/control_3/abundance.tsv",
+  "/home/data/tumour_1/abundance.tsv",
+  "/home/data/tumour_2/abundance.tsv",
+  "/home/data/tumour_3/abundance.tsv"
+)
+```
+
+
+# Tximport
+
+### BiomaRt is used to connect to the ENSEMBL databases and then allows us to map transcript IDs with gene IDs.
+
+```{r}
+mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl")
+
+```
+
+### Transcript to gene (tx2gene)
+
+```{r}
+tx2gene <- getBM(attributes = c("ensembl_transcript_id_version", "hgnc_symbol"), mart = mart, useCache = FALSE)
+head(tx2gene)
+```
+
+### TXI object
+
+Tximport imports transcript-level abundances from quantification tools such as kallisto and converts them to gene counts for downstream analysis.
+
+```{r}
+txi <- tximport(files, type = "kallisto", tx2gene = tx2gene)
+head(txi$abundance)
+```
+
+# DESeq2 
+
+### Design 
+
+The model design is the most important element of our RNA Seq Analysis, here we will specify the design model.
+
+### DDS
+
+
+```{r}
+dds <- DESeqDataSetFromTximport(txi, colData = samples, design = ~ Condition)
+```
+
+This step sets the stage for in-depth analysis. By creating a DESeqDataSet, we're preparing the data for rigorous examination of differential expression, a critical process in understanding how genes behave across different conditions.
+
+### Factor levels
+
+```{r}
+dds$Condition <- relevel(dds$Condition, ref = "control")
+
+dds <- DESeq(dds)
+
+result_names <- resultsNames(dds)
+result_names
+
+```
+
+After preparing the DESeqDataSet, the code takes another important step. It adjusts the 'Condition' variable to establish a reference level, often used for comparison. Following this, the DESeq function is applied to perform differential expression analysis. Finally, the variable 'result_names' is assigned the names of the results, a crucial list for further exploration and interpretation of the analysis.
+
+# Quality Control 
+
+We will use the gene-level counts to perform some quality control checks on the samples in the experiment.
+
+### Extract counts
+
+This code gets important gene data. It adjusts for differences in measurements. Storing the data as 'counts' and is then ready for detailed analysis. This is key for understanding gene behaviour.
+
+```{r}
+counts <- counts(dds, normalized= TRUE)
+counts
+```
+
+This code gets important gene data. It adjusts for differences in measurements. Storing the data as 'counts' and is then ready for detailed analysis. This is key for understanding gene behaviour.
+
+The table shows gene numbers in different samples. Rows are genes, columns are samples. Numbers show gene levels after adjusting for differences.
+
+For example, the first row has sample numbers (e.g., [,1], [,2], ..., [,4]). Above are genes (e.g., A1BG, A1CF, A2M, A2ML1), with numbers showing their levels. This data helps study how genes react in experiments.
+
+
+
+```{r}
+log2_counts <- assay(normTransform(dds))
+rld_counts <- assay(rlog(dds))
+
+library(vsn)
+library(hexbin)
+
+
+log2_plt <- meanSdPlot(log2_counts, ranks=FALSE, plot=FALSE)
+log2_plt$gg + ggtitle("Log2 + PC Transformation") + xlim(0,20)
+```
+
+
+
+This segment processes the normalised gene expression data to prepare it for analysis. It applies transformations to achieve better representation.
+
+The first two lines calculate log2-transformed counts and regularised log-transformed counts. These transformations are important for improving the data's suitability for analysis.
+
+The 'meanSdPlot' function generates a plot displaying the relationship between the mean and standard deviation of the data. This helps in understanding the data's distribution and variability. We can see as the mean increases the relationship between the mean and sd decreases with the majority of the counts being towards the left hand side of the plot and they steadily decrease as the mean increases, implying that there are maybe more downregulated genes present in the counts. 
+
+
+
+```{r}
+rld_plt <- meanSdPlot(rld_counts, ranks=FALSE, plot=FALSE)
+rld_plt$gg + ggtitle("Rlog Transformation") + xlim(0,20)
+```
+
+This code segment continues the analysis of gene expression data. It specifically focuses on data transformed using regularised log (rlog) transformation.
+Similar to the previous code, it calculates the mean and standard deviation of the rlog-transformed counts, creating a plot that visualises their relationship. This plot aids in understanding the distribution and variability of the transformed data.
+We can see from the plot that the sd is highest when the mean is around 7.5-10 and the majority of the count lies within the range 5-15.
+This is typical of count data as most genes will be expressed at moderate levels.
+
+
+### Sample Heatmap
+
+```{r}
+sampleDists <- dist(t(rld_counts))
+sampleDists
+sampleDists <- dist(t(rld_counts))
+sampleDistMatrix <- as.matrix(sampleDists)
+
+```
+
+This output represents a distance matrix derived from the regularised log-transformed gene expression data. Each row and column corresponds to a sample, and the value in each cell indicates the distance (or dissimilarity) between the corresponding pairs of samples.
+
+For example, the value at row 2, column 1 (12.48930) indicates the distance between sample 2 and sample 1. The distances are symmetric, meaning the distance between sample 2 and sample 1 is the same as the distance between sample 1 and sample 2.
+
+This distance matrix is a crucial tool for understanding the similarity or dissimilarity between samples based on their gene expression profiles. It can be used for various types of analysis, such as clustering or multidimensional scaling, to explore patterns or relationships within the dataset.
+
+
+```{r}
+ann <- data.frame(Sample = samples$Sample, Condition = samples$Condition)
+col <- c("blue", "forestgreen")
+names(col) <- c("control", "tumour")
+ann_col <- list(Condition = col)
+
+ann_col
+```
+
+
+### A heatmap of sample distances matrix gives an overview of similarities and dissimilarities between samples.
+
+```{r}
+rownames(ann) <- rownames(sampleDistMatrix)
+
+pheatmap(mat=sampleDistMatrix,
+         clustering_distance_rows=sampleDists,
+         clustering_distance_cols=sampleDists,
+         annotation_col = ann,
+         annotation_colors = ann_col,
+         col=hcl.colors(100,"GnBu",rev=T))
+```
+
+The heatmap provides a visual representation of the sample distances, revealing patterns and relationships within the dataset. Hierarchical clustering was applied to both rows and columns, grouping similar samples together. Annotations alongside the heatmap offer additional context, highlighting sample attributes such as sample IDs, such as what sample each column represents, and conditions. The color palette, transitioning from green to blue, aids in interpreting the relative differences in gene expression levels. This heatmap serves as a valuable tool for exploring the underlying structure of the data and identifying potential clusters or trends.
+
+### Principal component analysis (PCA)
+
+PCA plots the variance explained by samples in each principal component. Typically PC1 & PC2 explain the most variation in a dataset, so they are the two we will be focusing on.
+
+PCA can give you a good idea of how succesful the Differential Expression analysis will be - samples that are very close together in PC feature space will not produce as many DE genes as those that are separated by a large distance.
+
+
+
+
+
+```{r}
+p <- pca(rld_counts, metadata = samples)
+
+biplot(p,
+       colby = 'Condition',
+       colkey = c('control'='blue', 'tumour'='forestgreen'),
+       hline = 0,
+       vline = 0,
+       legendPosition = 'right',
+       legendLabSize = 12,
+       legendIconSize = 8.0,
+       title = 'PCA bi-plot',
+       subtitle = 'PC1 versus PC2')
+```
+
+
+
+In the plot above we can see that samples from control group and tumour group are not clustered together and there is excellent separation in the bi-plot. 
+The PCA bi-plot visually represents the comparison between control and tumor samples. PC1 and PC2, which collectively explain 72.89% of the total variability, reveal distinct clustering patterns, suggesting potential differences in underlying biological factors between the two groups
+
+
+# Differential Expression Analysis
+
+### DESeq results()
+
+```{r}
+tumour_v_ctrl <- results(dds, filterFun=ihw, alpha=0.05, contrast=c("Condition", "tumour", "control"))
+res1 <- lfcShrink(dds=dds, res=tumour_v_ctrl, coef=2, type="apeglm")
+summary(res1)
+res1
+```
+
+The results show significant differential expression between tumor and control samples, with an adjusted p-value threshold of 0.05. The log-fold changes have been shrunk using an apeglm approach (Zhu, A., Ibrahim, J.G., Love, M.I. (2018) Heavy-tailed prior distributions for sequence count data: removing the noise and preserving large differences. Bioinformatics. https://doi.org/10.1093/bioinformatics/bty895), providing more reliable estimates of the effect sizes.
+
+
+
+### Write DE results
+
+```{r}
+get_upregulated <- function(df){
+  key <- intersect(rownames(df)[which(df$log2FoldChange >= 1)], rownames(df)[which(df$pvalue <= 0.05)])
+  results <- as.data.frame((df)[which(rownames(df) %in% key),])
+  return(results)
+}
+
+get_downregulated <- function(df){
+  key <- intersect(rownames(df)[which(df$log2FoldChange <= -1)], rownames(df)[which(df$pvalue <= 0.05)])
+  results <- as.data.frame((df)[which(rownames(df) %in% key),])
+  return(results)
+}
+
+
+```
+
+The get_upregulated function identifies genes that are upregulated based on specified criteria. It selects genes with a log2 fold change of 1 or higher and a p-value of 0.05 or lower from the input data frame.
+
+The get_downregulated function identifies genes that are downregulated based on specified criteria. It selects genes with a log2 fold change of -1 or lower and a p-value of 0.05 or lower from the input data frame."
+
+
+
+```{r}
+upregulated_genes <- get_upregulated(res1)
+downregulated_genes <- get_downregulated(res1)
+
+```
+
+
+
+```{r}
+
+
+upregulated_annotated <- getBM(attributes = c("ensembl_gene_id", "external_gene_name"), 
+                               filters = "ensembl_gene_id", 
+                               values = rownames(upregulated_genes), 
+                               mart = mart)
+
+downregulated_annotated <- getBM(attributes = c("ensembl_gene_id", "external_gene_name"), 
+                                 filters = "ensembl_gene_id", 
+                                 values = rownames(downregulated_genes), 
+                                 mart = mart)
+
+```
+
+## Dataframes for Up and Downregulated genes
+
+```{r}
+print(upregulated_genes)
+
+print(downregulated_genes)
+
+```
+
+## Summary of Up and DownRegulated Genes
+
+```{r}
+summary(upregulated_genes)
+
+summary(downregulated_genes)
+
+```
+
+Up_regulated genes;
+
+baseMean: The majority of genes have a relatively low baseline expression level, with the median baseMean being around 127.26. However, there is a wide range of expression levels, as indicated by the minimum and maximum values (4.78 to 9055.23).
+log2FoldChange: The log2 fold changes range from 1.001 to 5.340, suggesting substantial differences in expression levels between the conditions being compared. The median log2 fold change is 1.395, indicating a notable increase in expression.
+lfcSE: The standard error of the log2 fold changes varies, with the median being around 0.31127. This suggests varying levels of uncertainty in the estimated fold changes.
+pvalue: The p-values indicate the level of statistical significance for the differential expression of genes. The majority of genes have very low p-values, suggesting strong evidence for differential expression.
+padj: The adjusted p-values (or false discovery rates) range from 0 to 0.9359573. The median adjusted p-value is 0.0000252, indicating a low false discovery rate for most genes.
+
+Down_regulated genes;
+
+baseMean: The baseline expression levels for this set of genes also tend to be relatively low, with a median baseMean of 148.22. The range of expression levels is from 13.50 to 8069.19.
+log2FoldChange: The log2 fold changes for this set range from -3.275 to -1.108, indicating a notable decrease in expression levels.
+lfcSE: The standard error of the log2 fold changes varies, with the median being around 0.4074. Similar to the first set, this suggests varying levels of uncertainty in the estimated fold changes.
+pvalue: The p-values for this set of genes are generally low, indicating strong evidence for differential expression.
+padj: The adjusted p-values range from 0 to 0.03708, suggesting a low false discovery rate for most genes.
+Overall, these statistics suggest substantial differences in gene expression between the conditions being compared, with a majority of genes showing strong evidence for differential expression. The variability in expression levels and associated uncertainties in fold changes highlight the complexity of the underlying biological processes
+
+## Top ten upregulated genes
+
+```{r}
+
+filtered_genes <- upregulated_genes[upregulated_genes$log2FoldChange > 1 & upregulated_genes$pvalue <= 0.05,]
+
+filtered_genes <- filtered_genes[order(-filtered_genes$log2FoldChange),]
+
+top_genes <- head(filtered_genes, n = 10)
+
+print(top_genes)
+```
+
+
+# Results Plots
+
+## Volcano Plot
+
+
+```{r}
+volcano_plot_combined <- function(up_df, down_df, threshold = 0.05, log2FC = 1) {
+  up <- up_df[up_df$log2FoldChange > log2FC & up_df$pvalue < threshold, ]
+  down <- down_df[down_df$log2FoldChange < -log2FC & down_df$pvalue < threshold, ]
+  
+  plot(c(up_df$log2FoldChange, down_df$log2FoldChange), 
+       c(-log10(up_df$pvalue), -log10(down_df$pvalue)), 
+       col="grey", xlab="log2 Fold Change", ylab="-log10 p-value", main="Volcano Plot")
+  
+  points(up$log2FoldChange, -log10(up$pvalue), col="red", pch=16)
+  points(down$log2FoldChange, -log10(down$pvalue), col="blue", pch=16)
+  
+  legend("topright", legend=c("Upregulated", "Downregulated"), 
+         col=c("red", "blue"), pch=16)
+}
+
+volcano_plot_combined(upregulated_genes, downregulated_genes)
+
+```
+
+
+Every point on the plot corresponds to a gene that is significantly differentially expressed between the conditions being compared (control and tumour samples), based on the specified criteria for fold change and statistical significance. The plot provides a visual representation of these differentially expressed genes, making it easier to identify patterns and trends in the data. We can see for the the conditions set for this plot, there are more than two times the amount of upregulated genes when compared to the down regulated genes.
+
+
+```{r}
+res1 <- na.omit(res1)
+
+min_width <- min(res1$log2FoldChange)
+max_width <- max(res1$log2FoldChange)
+max_height <- -log10(min(res1[res1$pvalue>0, 5]))
+
+up <- subset(res1, res1$log2FoldChange > 1 & res1$pvalue <= 0.05)
+up <- up[order(-up$log2FoldChange),]
+up_list <- head(rownames(up), n=10L)
+
+down <- subset(res1, res1$log2FoldChange < -1 & res1$pvalue <= 0.05)
+down <- down[order(down$log2FoldChange),]
+down_list <- head(rownames(down), n=10L)
+
+plot_top_20 <- c(up_list, down_list)
+
+EnhancedVolcano(res1,
+                lab=rownames(res1),
+                x="log2FoldChange",
+                y="pvalue",
+                selectLab=plot_top_20,
+                drawConnectors=TRUE,
+                legendPosition = "none",
+                FCcutoff=1.0,
+                pCutoff=0.05,
+                title="Volcano Plot",
+                subtitle="Tumour vs. Control",
+                caption = paste0('Total Genes = ', nrow(res1)),
+                xlim=c(min_width, max_width),
+                ylim=c(0, max_height))
+```
+
+
+The upregulated genes are once again represented by the red dots, apeglm filters through these values (pvalues and logf changes to determine which ones are viable)
+Gene names are displayed for points that meet specific criteria, aiding in the identification of individual genes.
+You can see that there are genes with very large log2 FC values. As a rule of thumb, be skeptical of genes that have LFC values over +/- 10.
+
+
+### Apeglm visualised
+
+```{r}
+res1 <- na.omit(tumour_v_ctrl)
+
+min_width <- min(res1$log2FoldChange)
+max_width <- max(res1$log2FoldChange)
+max_height <- -log10(min(res1[res1$pvalue>0, 5]))
+
+up <- subset(res1, res1$log2FoldChange > 1 & res1$pvalue <= 0.05)
+up <- up[order(-up$log2FoldChange),]
+up_list <- head(rownames(up), n=10L)
+
+down <- subset(res1, res1$log2FoldChange < -1 & res1$pvalue <= 0.05)
+down <- down[order(down$log2FoldChange),]
+down_list <- head(rownames(down), n=10L)
+
+plot_top_20 <- c(up_list, down_list)
+
+EnhancedVolcano(res1,
+                lab=rownames(res1),
+                x="log2FoldChange",
+                y="pvalue",
+                selectLab=plot_top_20,
+                drawConnectors=TRUE,
+                FCcutoff=1.0,
+                pCutoff=0.05,
+                title="Volcano Plot",
+                subtitle="Tumour vs. Control",
+                legendLabSize=8,
+                caption = paste0('Total Genes = ', nrow(res1)))
+
+
+```
+
+
+This plot provides a visual representation of the differential gene expression analysis between the tumour and control samples.
+Genes are represented as points on the plot, with their positions determined by log2 fold change and the negative logarithm of the p-value.
+Points on the plot are coloured differently based on their significance levels/the values they are based on, making it easy to identify genes with substantial changes in expression.
+You can see that there are genes with very large log2 FC values. As a rule of thumb, be skeptical of genes that have LFC values over +/- 10.
+
+The caption at the bottom of the plot indicates the total number of genes in the dataset, giving an overview of the dataset size.
+
+## Heatmaps
+
+```{r}
+library(pheatmap)
+pheatmap(as.matrix(upregulated_genes[c("baseMean", "log2FoldChange", "pvalue", "padj")]), main="Upregulated Genes")
+pheatmap(as.matrix(top_genes[c("baseMean", "log2FoldChange", "pvalue", "padj")]), main="Top ten Upregulated Genes")
+pheatmap(as.matrix(downregulated_genes[c("baseMean", "log2FoldChange", "pvalue", "padj")]), main="Downregulated Genes")
+
+```
+
+Heatmap of upregulated genes:
+
+The heatmap displays a grid of color-coded cells, with rows representing individual genes and columns representing the selected statistics (baseMean, log2FoldChange, pvalue, and padj).
+Warmer colors (e.g., red or yellow) indicate higher values, while cooler colors (e.g., blue) represent lower values for each statistic.
+Clusters of genes with similar expression patterns are visible, providing insights into potential biological trends among these upregulated genes.
+It is quite hard to interpret due to the amount of genes present so I provided a heat map of the top ten upregulated genes, within it the same type of colour pattern can be seen, just much clearer.
+
+Heatmap of downregulated genes:
+
+Similar to the heatmap for upregulated genes, this heatmap displays a grid of color-coded cells representing the selected statistics.
+Again, warmer colors indicate higher values which can be seen in the baseMean of HMGCS1, while cooler colors represent lower values for each statistic.
+
+These heatmaps provide a visual summary of the selected statistics for both upregulated and downregulated genes, aiding in the identification of expression patterns and potential underlying biological processes. It is evident in the heatmaps that the upregulated genes dataset contains alot more entries than the downregulated one, making it harder to read/interpret
+
+
+
+
+# Pathway Analysis
+
+## fgsea
+
+```{r}
+res1 <- na.omit(res1)
+```
+
+
+```{r}
+res <- as.data.frame(res1) 
+res$hgnc_symbol <- rownames(res)
+
+fgsea_rank <- res %>%
+              dplyr::select(hgnc_symbol, log2FoldChange) %>%
+              na.omit() %>%
+              distinct() %>%
+              group_by(hgnc_symbol) %>%
+              summarize(stat=mean(log2FoldChange))
+
+fgsea_rank
+```
+
+This table displays HGNC symbols (gene names) alongside their corresponding average log2 fold changes. Each row represents a unique gene, providing valuable insights into the differential expression patterns observed in the dataset. These values serve as a crucial foundation for downstream analysis, such as gene set enrichment analysis (FGSEA), aiding in the identification of biologically relevant pathways and processes.
+
+```{r}
+rank <- deframe(fgsea_rank)
+head(rank, 20)
+```
+
+The following output is a named vector rank with HGNC symbols as names and their corresponding log2 fold changes as values. Each entry represents a gene, and its associated log2 fold change.
+
+## Enrichment Plots
+
+```{r}
+pathway <- gmtPathways("/home/rstudio/c6.all.v2023.2.Hs.symbols.gmt")
+head(pathway, 1)
+```
+
+```{r}
+fgsea <- fgsea(pathways=pathway, stats=rank, nperm=1000)
+
+fgseaResTidy <- fgsea %>%
+  as_tibble() %>%
+  arrange(desc(NES))
+
+fgseaResTidy %>%
+  dplyr::select(-leadingEdge, -ES, -nMoreExtreme) %>%
+  arrange(padj) %>%
+  DT::datatable()
+```
+
+The provided code conducts a Gene Set Enrichment Analysis on specified pathways using a ranking metric. The use of 1000 permutations indicates a thorough evaluation of enrichment scores. The results are then processed to emphasise the importance of the Normalised Enrichment Score (NES) by arranging them in descending order. This suggests a focus on highly enriched pathways. Further refinement is performed by removing less relevant columns and prioritising pathways based on adjusted p-values. The resulting interactive data table indicates a desire for user-friendly exploration and visualisation of the enriched pathways.
+
+The output displays the results of a Gene Set Enrichment Analysis (GSEA) with information about different pathways.
+Here's what each column represents:
+
+pathway: The name or identifier of the biological pathway.
+pval: The p-value associated with the enrichment of genes in the pathway.
+padj: The adjusted p-value (often used to control for multiple testing).
+NES: The Normalised Enrichment Score, which measures the enrichment of genes in the pathway.
+size: The number of genes in the pathway.
+For example, the first row corresponds to the pathway "HINATA_NFKB_IMMU_INF" with a p-value of approximately 0.0132, an adjusted p-value of 1, a NES of approximately 1.6282, and it contains 15 genes.
+
+These results provide insights into which pathways are enriched based on the differential expression analysis you performed. Lower p-values and higher NES values suggest stronger evidence of pathway enrichment.
+
+## Enrichment Plots
+
+```{r}
+filtered_pathway1 <- subset(fgsea, NES > 1.19)
+filtered_pathway1
+```
+
+This filters the GSEA results to retain pathways with a Normalised Enrichment Score greater than 1.2. The choice of this threshold indicates a focus on highly enriched pathways, potentially suggesting strong biological relevance.
+
+
+
+```{r}
+filtered_pathway2 <- subset(fgsea, NES < -1.3)
+filtered_pathway2
+```
+
+In this case, it is filtering pathways based on a Normalised Enrichment Score that is less than -1.3. This means it is focusing on pathways that are strongly depleted or underrepresented in the dataset, just as an example of some of the pathways which arent statistically significant.
+
+```{r}
+filt_down <- as.vector(filtered_pathway1$pathway)
+
+for (i in filt_down){
+    plt <- plotEnrichment(pathway = pathway[[i]],
+    gseaParam = 1, ticksSize = 0.5, stats= rank) +
+    labs(title=i) + theme(plot.title = element_text(hjust = 0.5, face="bold"))
+    print(plt)
+}
+```
+
+
+The first plot visualises the enrichment scores for the pathway "ESC_J1_UP_EARLY.V1_DN". The x-axis represents the ranking of genes, while the y-axis shows the enrichment score. The green line tracks the enrichment scores, with numerous black lines marking the ranks/genes. The green line rises steeply, hitting the top red dotted line at an enrichment score of 0.4 around rank 4000, and descends, hitting the bottom red dotted line at around -0.05 at rank 17500. This suggests a significant enrichment pattern in this pathway.
+
+The second plot visualises the enrichment scores for the pathway "HINATA_NFKB_IMMU_INF". The x-axis represents the ranking of genes, while the y-axis shows the enrichment score. The green line tracks the enrichment scores, with numerous black lines marking the ranks/genes. The green line rises steeply, hitting the top red dotted line at an enrichment score of roughly 0.65 around rank 2000, and descends, hitting the bottom red dotted line at 0.0 at around rank 21500. This suggests a significant enrichment pattern in this pathway.
+
+The third plot visualises the enrichment scores for the pathway "KRAS.AMP.LUNG_UP.V1_DN". The x-axis represents the ranking of genes, while the y-axis shows the enrichment score. The green line tracks the enrichment scores, with numerous black lines marking the ranks/genes. The green line rises steeply once again, hitting the top red dotted line at an enrichment score of roughly 0.45 around rank 3000, and descends, hitting the bottom red dotted line at -0.05 at around rank 18000 and then again just after 20000. This suggests a significant enrichment pattern in this pathway.
+
+The fourth plot visualises the enrichment scores for the pathway "KRAS.LUNG_UP.V1_UP". The x-axis represents the ranking of genes, while the y-axis shows the enrichment score. The green line tracks the enrichment scores, with numerous black lines marking the ranks/genes. The green line rises steeply once again, hitting the top red dotted line at an enrichment score of roughly 0.4 around rank 4000, and descends, hitting the bottom red dotted line at -0.2 numerous times from around rank 17500 to just after 20000. This suggests a significant enrichment pattern in this pathway.
+
+The fifth plot visualises the enrichment scores for the pathway "P53_DN.V2_UP". The x-axis represents the ranking of genes, while the y-axis shows the enrichment score. The green line tracks the enrichment scores, with numerous black lines marking the ranks/genes. The green line rises steeply once again, hitting the top red dotted line at an enrichment score of roughly 0.4, hitting it numerous times around rank 4500, and descends, hitting the bottom red dotted line at -0.2 multiple times at around rank 17500. This suggests a significant enrichment pattern in this pathway.
+
+The sixth plot visualises the enrichment scores for the pathway "WNT_UP.V1_UP". The x-axis represents the ranking of genes, while the y-axis shows the enrichment score. The green line tracks the enrichment scores, with numerous black lines marking the ranks/genes. The green line rises steeply once again, hitting the top red dotted line at an enrichment score of roughly 0.4 around rank 4000, and descends, hitting the bottom red dotted line at -0.1 at around rank 18000. This suggests a significant enrichment pattern in this pathway.
+
+
+
+```{r}
+filt_down <- as.vector(filtered_pathway2$pathway)
+
+for (i in filt_down){
+    plt <- plotEnrichment(pathway = pathway[[i]],
+    gseaParam = 1, ticksSize = 0.5, stats= rank) +
+    labs(title=i) + theme(plot.title = element_text(hjust = 0.5, face="bold"))
+    print(plt)
+}
+```
+
+
+The first plot visualises the enrichment scores for the pathway "CAHOY_NEURONAL". The x-axis represents the ranking of genes, while the y-axis shows the enrichment score. The green line tracks the enrichment scores, with numerous black lines marking the ranks/genes. The green line rises steeply towards an enrichment score of around 0.15, around rank 2200, and descends, hitting the bottom red dotted line at roughly -0.4 at around rank 17500. This suggests a significant downregulation pattern in this pathway.
+
+The second plot visualises the enrichment scores for the pathway "CSR_LATE_UP.V1_DN". The x-axis represents the ranking of genes, while the y-axis shows the enrichment score. The green line tracks the enrichment scores, with numerous black lines marking the ranks/genes. The green line rises steeply once again, hitting the top red dotted line at an enrichment score of roughly 0.1 around rank 2200, and descends, hitting the bottom red dotted line at roughly -0.4 at around rank 17500. This suggests a significant downregulation pattern in this pathway.
+
+The third plot visualises the enrichment scores for the pathway "MTOR_UP.V1_UP". The x-axis represents the ranking of genes, while the y-axis shows the enrichment score. The green line tracks the enrichment scores, with numerous black lines marking the ranks/genes. The green line falls/maintains for the first bit and hits just above 0.0 at around 2500 then falls quite steeply to around 17500 and at that point it has an enrichment score of just under -0.4. This suggests a significant downregulation pattern in this pathway.
+
+
+## Note on some of the top DEGs linked to cancer
+
+There are direct implications in cancer biology for several genes that show significant alterations in this analysis. First, a crucial gene called TP53 (Tumour Protein 53) is recognised for its function in controlling the development of the cell cycle and inhibiting the growth of tumors. Many malignancies have TP53 mutations, which impair the protein's capacity to inhibit aberrant cell development. This may result in unchecked cell division and proliferation, which is a defining feature of cancer. Because of its crucial function as a tumour suppressor gene, TP53 has been a major topic in cancer research. Efforts are being undertaken to either target alternative pathways in cases where TP53 is altered or restore its function.
+Another important gene in cancer biology is MYC (MYC Proto-Oncogene). MYC is a transcription factor that controls the expression of many genes essential for cell division and growth. MYC overexpression is often seen in cancer cells, where it promotes unchecked cell proliferation and the growth of tumors. since of its increased activity, MYC is a desirable target for therapeutic intervention since it plays a role in the aggressive character of many malignancies. Research on creating medications that precisely target MYC is quite active.
+The cell surface receptor known as EGFR (Epidermal Growth Factor Receptor) is essential to cell signaling. It is a part of processes including differentiation, proliferation, and division of cells. In lung and breast malignancies, dysregulation of EGFR is frequently seen, which results in unchecked cell proliferation. Tumor formation and subsequent spread may ensue from this. Targeted treatments against EGFR have demonstrated potential in the treatment of certain cancer subtypes in recent years. The goal of these treatments is to stop the proliferation and spread of cancer cells by blocking EGFR activation.
+The gene VEGFA, or vascular endothelial growth factor A, is crucial for the process of angiogenesis, or the development of new blood vessels. This process is essential for giving developing tumors the nutrition and oxygen they need. One promising tactic in cancer anti-angiogenic therapy is to inhibit VEGFA signaling. These treatments rob cancers of their blood supply by interfering with the angiogenesis process, which prevents the tumours from growing and spreading.
+Lastly, the tumour suppressor gene CDKN2A (Cyclin-Dependent Kinase Inhibitor 2A) functions as a checkpoint in the advancement of the cell cycle. It stops unchecked cell division by regulating the regular flow of cells through the cell cycle. Changes in CDKN2A can interfere with this regulation, causing cells to proliferate uncontrolled and accelerating the onset of cancer. CDKN2A is a crucial gene to research in the context of cancer biology since loss of function mutations in this gene are linked to an increased risk of getting different types of malignancies.
+In summary, these identified genes - TP53, MYC, EGFR, VEGFA, and CDKN2A - illuminate critical aspects of cancer biology. Their dysregulation significantly impacts cellular processes, ultimately contributing to tumorigenesis. Gaining a deeper understanding of these genes provides valuable insights for the development of precise and effective therapeutic interventions in the fight against cancer.
+
+## Note on my results linking the top 5 upregulated genes (based on their log2foldchange) to known cancer biology
+
+Gene: ID3
+
+baseMean: 274.256208
+log2FoldChange: 5.340037
+lfcSE: 0.3510736
+pvalue: 2.926086e-53
+padj: 7.993740e-50
+
+Link to Cancer Biology:
+ID3 (Inhibitor of DNA binding 3) is a transcription factor known to be involved in cell differentiation and development. In various cancers, ID3 has been found to play a role in promoting cell proliferation and inhibiting apoptosis. It has been associated with several cancer types, including leukemia, breast cancer, and melanoma.
+
+Gene: MAGEA4
+
+baseMean: 4.779527
+log2FoldChange: 5.249618
+lfcSE: 2.7398743
+pvalue: 3.344444e-04
+padj: 4.246152e-01
+
+Link to Cancer Biology:
+MAGEA4 (Melanoma antigen family A, 4) is a member of the MAGE family of cancer-testis antigens. It is known to be expressed in a variety of cancers, including melanoma, lung cancer, and esophageal cancer. MAGEA4 expression has been associated with tumor progression, metastasis, and resistance to therapy.
+
+Gene: ID1
+
+baseMean: 17.438892
+log2FoldChange: 4.655481
+lfcSE: 1.0151019
+pvalue: 8.011823e-07
+padj: 5.199150e-04
+
+Link to Cancer Biology:
+ID1 (Inhibitor of DNA binding 1) is a helix-loop-helix (HLH) protein involved in transcriptional regulation. It has been implicated in cancer progression, angiogenesis, and metastasis. ID1 is associated with various cancer types, including breast cancer, prostate cancer, and pancreatic cancer.
+
+Gene: PDPR2P
+
+baseMean: 28.335573
+log2FoldChange: 4.404639
+lfcSE: 0.9246374
+pvalue: 1.344097e-07
+padj: 1.073515e-04
+
+Link to Cancer Biology:
+PDPR2P (Pentose Phosphate Pathway Reductase 2P) is a pseudogene related to the pentose phosphate pathway, which plays a critical role in cellular metabolism. While PDPR2P itself may not have direct implications in cancer, alterations in metabolic pathways, including the pentose phosphate pathway, have been implicated in cancer development and progression.
+
+Gene: ADAMTS12
+
+baseMean: 21.319627
+log2FoldChange: 4.023226
+lfcSE: 0.6770356
+pvalue: 2.251320e-10
+padj: 2.327975e-07
+
+Link to Cancer Biology:
+ADAMTS12 (A Disintegrin And Metalloproteinase with Thrombospondin Motifs 12) is an extracellular matrix protease that has been implicated in cancer-related processes, including tumor invasion, angiogenesis, and metastasis. It has been studied in various cancer types, including breast cancer, ovarian cancer, and colorectal cancer.
+These genes represent promising candidates for further investigation in the context of cancer biology, given their known associations with cancer-related processes. Keep in mind that further experimental validation and detailed mechanistic studies would be needed to fully understand their roles in specific cancer types and contexts.
+
+

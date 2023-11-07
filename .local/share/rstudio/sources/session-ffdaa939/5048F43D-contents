@@ -1,0 +1,103 @@
+---
+title: "MA5111 assignment"
+output: html_document
+date: "2023-10-26"
+---
+
+```{r}
+library(dplyr)
+library(biomaRt)
+library(tximport)
+library(rhdf5)
+library(gplots)
+library(org.Hs.eg.db)
+library(DESeq2)
+library(DT)
+library(apeglm)
+library(RColorBrewer)
+library(IHW)
+library(PCAtools)
+library(pheatmap)
+library(clusterProfiler)
+library(EnhancedVolcano)
+library(ComplexHeatmap)
+library(circlize)
+library(fgsea)
+library(tidyverse)
+library(ggpubr)
+```
+
+```{r}
+quant_dir <- "/home/data/"
+list.files(quant_dir)
+```
+
+```{r}
+samples <- read.csv("/home/data/samples.csv", header = TRUE, row.names = "sample")
+samples
+```
+
+
+```{r}
+samples$Condition <- factor(samples$Condition)
+
+# check its ok:
+factor_cols <- sapply(samples, is.factor)
+factor_cols
+```
+
+
+```{r}
+files <- c(
+  "control_1", "control_2", "control_3",
+  "tumour_1", "tumour_2", "tumour_3"
+)
+
+# Add full file paths
+files_full_paths <- c(
+  "/home/data/control_1/abundance.h5", "/home/data/control_2/abundance.h5", "/home/data/control_3/abundance.h5",
+  "/home/data/tumour_1/abundance.h5", "/home/data/tumour_2/abundance.h5", "/home/data/tumour_3/abundance.h5"
+)
+
+# Combine names and paths
+names(files_full_paths) <- files
+
+# Print the updated files
+print(files_full_paths)
+
+# Check if files exist
+files_exist <- file.exists(files_full_paths)
+
+# Print the result
+cat(files_exist, sep = "\n")
+
+```
+
+
+```{r}
+print(rownames(samples))
+files <- file.path(quant_dir, rownames(samples), "abundance.h5")
+names(files) <- paste0(rownames(samples))
+files
+```
+```{r}
+mart <- useMart(biomart = "ensembl", dataset = "hsapiens_gene_ensembl")
+
+```
+
+```{r}
+tx2gene <- getBM(attributes = c("ensembl_transcript_id_version", "hgnc_symbol"), mart = mart, useCache = FALSE)
+```
+
+
+```{r}
+head(tx2gene)
+```
+
+
+```{r}
+
+txi <- tximport(files, type = "kallisto", tx2gene = tx2gene)
+head(txi$abundance)
+```
+

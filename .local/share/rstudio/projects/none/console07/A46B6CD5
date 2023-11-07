@@ -1,0 +1,13 @@
+]0;/home[?2004h]0;rstudio@bc83f229cab7: /home[01;32mrstudio@bc83f229cab7[00m:[01;34m/home[00m$ cd ~
+[?2004l]0;/home/rstudio[?2004h]0;rstudio@bc83f229cab7: ~[01;32mrstudio@bc83f229cab7[00m:[01;34m~[00m$ ls
+[?2004lc6.all.v2023.2.Hs.symbols.gmt
+]0;/home/rstudio[?2004h]0;rstudio@bc83f229cab7: ~[01;32mrstudio@bc83f229cab7[00m:[01;34m~[00m$ cd ../
+[?2004l]0;/home[?2004h]0;rstudio@bc83f229cab7: /home[01;32mrstudio@bc83f229cab7[00m:[01;34m/home[00m$ ls
+[?2004l[0m[01;34mdata[0m  [01;34mkallisto[0m  [01;34mrstudio[0m  sudo
+]0;/home[?2004h]0;rstudio@bc83f229cab7: /home[01;32mrstudio@bc83f229cab7[00m:[01;34m/home[00m$ ls -l
+[?2004ltotal 16
+drwxr-xr-x  1 root    root    4096 Nov  6 12:17 [0m[01;34mdata[0m
+drwxr-xr-x 10 root    root    4096 Oct 12 19:31 [01;34mkallisto[0m
+drwxr-x---  1 rstudio rstudio 4096 Oct 27 12:03 [01;34mrstudio[0m
+-rw-r--r--  1 root    root       0 Nov  6 11:39 sudo
+]0;/home[?2004h]0;rstudio@bc83f229cab7: /home[01;32mrstudio@bc83f229cab7[00m:[01;34m/home[00m$ 
